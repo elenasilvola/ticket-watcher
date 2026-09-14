@@ -46,10 +46,15 @@ def fetch_resale_section(url: str) -> str:
             pass
         page.wait_for_timeout(1200)
         body_text = page.inner_text("body")
+        page_title = page.title()
+        page_url = page.url
         browser.close()
 
     idx = body_text.find(RESALE_HEADING)
     if idx == -1:
+        print(f"[debug] page.title() = {page_title!r}")
+        print(f"[debug] page.url = {page_url!r}")
+        print(f"[debug] body_text[:1500] = {body_text[:1500]!r}")
         raise RuntimeError("Resale-osiota ei löytynyt sivulta - sivun rakenne on ehkä muuttunut.")
     end_idx = body_text.find(SECTION_END_MARKER, idx)
     if end_idx == -1:
