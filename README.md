@@ -2,88 +2,81 @@
 
 Tarkistaa automaattisesti Ticketmaster-tapahtuman "Vahvistetut jälleenmyyntiliput"
 (resale) -osion ja lähettää sähköposti-ilmoituksen heti kun uusia lippuja
-ilmestyy myyntiin. Ajetaan GitHub Actionsissa n. 5 minuutin välein, täysin ilmaiseksi.
+ilmestyy myyntiin.
+
+**Käytössä oleva ajotapa: tämä Mac, `launchd`-ajastuksella, 5 min välein.**
+(GitHub Actions -vaihtoehto kokeiltiin, mutta Ticketmasterin bottisuojaus
+estää sen pilvipalvelin-IP:t suoraan — ks. "Miksi ei GitHub Actions" alla.)
 
 ## Miten se toimii
 
-- `check_tickets.py` avaa tapahtumasivun oikealla (headless) selaimella
-  Playwrightilla — pelkkä HTTP-haku ei toimi, koska Ticketmasterilla on
-  botintunnistushaaste ennen sivun latautumista.
+- `check_tickets.py` avaa tapahtumasivun Playwrightilla (headless Chromium)
+  ja `playwright-stealth`-kirjastolla, joka piilottaa tyypilliset
+  automaatiotunnisteet (mm. `navigator.webdriver`).
 - Skripti vertaa löydettyjen lippujen määrää edelliseen tarkistukseen
-  (`state.json`). Jos määrä kasvaa, lähetetään sähköposti Gmailin SMTP:n kautta.
-- GitHub Actions -workflow (`.github/workflows/check-tickets.yml`) ajaa
-  skriptin cron-ajastuksella ja committaa päivittyneen `state.json`:n
-  takaisin repoon, jotta tila säilyy ajojen välillä.
+  (`state.json`). Jos määrä kasvaa, lähetetään sähköposti Gmailin SMTP:n
+  kautta osoitteesta `elena.silvola@gmail.com` vastaanottajalle
+  `elena.silvola@hotmail.fi`.
+- macOS:n `launchd`-palvelu (`com.elenasilvola.ticketwatcher.plist`,
+  asennettu `~/Library/LaunchAgents/`-kansioon) käynnistää skriptin
+  automaattisesti 5 minuutin välein, myös uudelleenkäynnistyksen jälkeen.
 
-## Käyttöönotto
-
-### 1. Luo Gmailin sovelluskohtainen salasana
-
-Tätä käytetään vain sähköpostin lähettämiseen (osoitteesta
-`elena.silvola@gmail.com`), ei kirjautumiseen mihinkään.
-
-1. Varmista että Google-tilillä on 2-vaiheinen vahvistus päällä.
-2. Mene osoitteeseen https://myaccount.google.com/apppasswords
-3. Luo uusi sovelluskohtainen salasana (nimeksi esim. "ticket-watcher").
-4. Kopioi 16-merkkinen salasana talteen — sitä ei näytetä enää uudelleen.
-
-### 2. Luo GitHub-repo ja työnnä koodi
-
-Repo pitää olla **julkinen**, jotta GitHub Actions -ajot ovat ilmaisia
-rajattomasti (yksityisessä revossa ilmainen kiintiö loppuisi nopeasti
-5 min välein ajettavalta selainautomaatiolta). Salasanat pysyvät silti
-suojattuina GitHub Secretsissä — ne eivät näy kenellekään, eivät edes
-työkirjan lokeissa.
-
-Pyydä minua ajamaan tämä, tai aja itse:
+## Tila ja hallinta
 
 ```bash
-cd ~/ticket-watcher
-git init -b main
-git add .
-git commit -m "Alusta ticket-watcher"
-gh auth login
-gh repo create ticket-watcher --public --source=. --remote=origin --push
+# Onko ajastus käynnissä?
+launchctl list | grep ticketwatcher
+
+# Viimeisimmät lokirivit
+tail -f ~/ticket-watcher/logs/ticket-watcher.log
+
+# Pysäytä ajastus kokonaan
+launchctl bootout gui/$(id -u)/com.elenasilvola.ticketwatcher
+
+# Käynnistä uudelleen
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.elenasilvola.ticketwatcher.plist
+
+# Aja kerran heti (ei odota seuraavaa ajastettua hetkeä)
+launchctl kickstart -k gui/$(id -u)/com.elenasilvola.ticketwatcher
 ```
 
-### 3. Lisää salaisuudet (Secrets) ja asetukset (Variables)
+## Asetusten muuttaminen
 
-```bash
-gh secret set GMAIL_USER --body "elena.silvola@gmail.com"
-gh secret set GMAIL_APP_PASSWORD   # liitä 16-merkkinen sovellussalasana kehotteeseen
-gh secret set NOTIFY_EMAIL --body "elena.silvola@hotmail.fi"
+Asetukset ovat `~/ticket-watcher/.env`-tiedostossa (ei gitissä):
 
-gh variable set EVENT_URL --body "https://www.ticketmaster.fi/event/melo-louna0nline-lippuja/1181155277"
-gh variable set EVENT_LABEL --body "Melo, Louna0nline @ Allas Live"
+```
+EVENT_URL=...          # tapahtuman Ticketmaster-osoite
+EVENT_LABEL=...         # nimi joka näkyy sähköpostin otsikossa
+GMAIL_USER=...           # lähettäjän Gmail-osoite
+GMAIL_APP_PASSWORD=...  # Gmailin sovelluskohtainen salasana (16 merkkiä, ei välejä)
+NOTIFY_EMAIL=...         # vastaanottajan sähköposti
 ```
 
-Tai GitHubin verkkosivulla: repo → **Settings → Secrets and variables → Actions**.
+Tarkistusvälin muuttaminen: muokkaa `StartInterval`-arvoa (sekunteina)
+tiedostossa `~/Library/LaunchAgents/com.elenasilvola.ticketwatcher.plist`,
+tallenna, ja aja `launchctl bootout` + `launchctl bootstrap` uudelleen.
 
-### 4. Testaa manuaalisesti
+## Miksi ei GitHub Actions
 
-```bash
-gh workflow run check-tickets.yml
-gh run watch
-```
-
-Tai GitHubin sivulla: **Actions**-välilehti → *Tarkista jalleenmyyntiliput* → **Run workflow**.
-
-Jos kaikki toimii, ajastettu tarkistus alkaa pyöriä itsestään ~5 min välein.
+Kokeilimme ensin GitHub Actionsia (ilmainen, ei vaadi omaa konetta päällä),
+mutta Ticketmasterin bottisuojaus (todennäköisesti PerimeterX/HUMAN Security)
+esti GitHub Actionsin pilvipalvelin-IP:n suoraan sivulla
+"Your Browsing Activity Has Been Paused". Tämä ei liity meidän koodiin —
+kyse on IP-maineeseen perustuvasta estosta, jota ei voi kiertää.
+Workflow (`.github/workflows/check-tickets.yml`) on jätetty repoon mutta
+poistettu käytöstä (`gh workflow disable`).
 
 ## Tärkeitä huomioita
 
-- **Cloud-IP-riski:** GitHub Actions ajaa pilvipalvelimelta (ei kotisi
-  IP-osoitteesta). Testasin botintunnistuksen läpäisyn tällä koneella
-  onnistuneesti, mutta Ticketmasterin suojaus saattaa kohdella
-  datakeskus-IP:tä eri tavalla. Jos ajo alkaa toistuvasti epäonnistua
-  (`Actions`-välilehdellä näkyy punaisia ajoja), kerro minulle — voin
-  rakentaa vaihtoehdon, joka ajaa tarkistuksen tällä Macilla `launchd`:n
-  kautta (kotisi IP:stä, ei tätä riskiä).
-- **Ajastuksen tarkkuus:** GitHub Actionsin cron ei ole täsmällinen —
-  ajo voi joskus myöhästyä muutamalla minuutilla ruuhka-aikoina.
-- **60 päivän inaktiivisuussääntö:** GitHub sammuttaa ajastetut workflow't
-  jos repoon ei tule yhtään committia 60 päivään. Tämän pitäisi ratketa
-  itsestään, koska workflow committaa `state.json`:n joka ajolla.
+- **Botintunnistus on herkkä myös kotiverkosta:** testauksen aikana myös
+  tämä kone sai hetkellisen eston toistuvien nopeiden testiajojen jälkeen.
+  Korjasimme tämän `playwright-stealth`-kirjastolla ja nostamalla
+  tarkistusväliä 2 minuutista 5 minuuttiin. Jos esto ("Your Browsing
+  Activity Has Been Paused" -teksti lokissa) ilmestyy uudelleen, harkitse
+  tarkistusvälin kasvattamista edelleen (esim. 10-15 min).
+- **Mac pitää olla päällä/verkossa** tarkistusten välissä. Jos kone on
+  sammuksissa jonkin ajan, tarkistukset jatkuvat automaattisesti heti kun
+  kirjaudut takaisin sisään.
 - Skripti ei osta eikä varaa lippuja mitenkään — se vain lukee sivun ja
   lähettää ilmoituksen. Ostaminen jää sinulle, ja resell-liput voivat
   myydä loppuun nopeasti, joten ilmoituksen jälkeen kannattaa toimia heti.
@@ -93,10 +86,8 @@ Jos kaikki toimii, ajastettu tarkistus alkaa pyöriä itsestään ~5 min välein
 ```bash
 cd ~/ticket-watcher
 source venv/bin/activate
-export EVENT_URL="https://www.ticketmaster.fi/event/melo-louna0nline-lippuja/1181155277"
-export EVENT_LABEL="Melo testi"
-export GMAIL_USER="elena.silvola@gmail.com"
-export GMAIL_APP_PASSWORD="xxxx-xxxx-xxxx-xxxx"
-export NOTIFY_EMAIL="elena.silvola@hotmail.fi"
 python3 check_tickets.py
 ```
+
+`HEADLESS=false python3 check_tickets.py` avaa näkyvän selainikkunan,
+jos haluat nähdä mitä skripti oikeasti tekee.

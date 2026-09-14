@@ -13,13 +13,30 @@ Ymparistomuuttujat (ks. .env.example):
 """
 import json
 import os
+import random
 import re
 import smtplib
 import sys
+import time
 from email.mime.text import MIMEText
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from playwright_stealth import Stealth
+
+
+def load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+load_dotenv(Path(__file__).parent / ".env")
 
 RESALE_HEADING = "Vahvistetut jälleenmyyntiliput"
 RESALE_MARKER = "Vahvistettu jälleenmyyntilippu"
@@ -35,16 +52,22 @@ USER_AGENT = (
 )
 
 
+HEADLESS = os.environ.get("HEADLESS", "true").lower() == "true"
+
+
 def fetch_resale_section(url: str) -> str:
+    stealth = Stealth()
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page(user_agent=USER_AGENT, locale="fi-FI")
+        browser = p.chromium.launch(headless=HEADLESS)
+        context = browser.new_context(user_agent=USER_AGENT, locale="fi-FI")
+        stealth.apply_stealth_sync(context)
+        page = context.new_page()
         page.goto(url, wait_until="networkidle", timeout=45000)
         try:
             page.wait_for_selector(f"text={RESALE_HEADING}", timeout=20000)
         except Exception:
             pass
-        page.wait_for_timeout(1200)
+        page.wait_for_timeout(random.randint(1000, 2500))
         body_text = page.inner_text("body")
         page_title = page.title()
         page_url = page.url
