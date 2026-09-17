@@ -8,6 +8,8 @@ ilmestyy myyntiin.
 (GitHub Actions -vaihtoehto kokeiltiin, mutta Ticketmasterin bottisuojaus
 estää sen pilvipalvelin-IP:t suoraan — ks. "Miksi ei GitHub Actions" alla.)
 
+Windows-koneelle asennusohjeet: [windows/README.md](windows/README.md).
+
 ## Miten se toimii
 
 - `check_tickets.py` avaa tapahtumasivun Playwrightilla (headless Chromium)
